@@ -1,65 +1,172 @@
 # Data Mapping: go-geocore Schema → go-geology
 
-This document describes how each table in the go-geocore database schema maps to
-go-geology data structures, and how go-geology consumes them for geological body modeling.
+## Quick Reference
 
-## Mapping Table
+| go-geocore (DB) | go-geocore (Go) | go-geology | Consumption |
+|-----------------|-----------------|-----------|-------------|
+| `wells` + `well_surveys` + `well_strata` | `Well` | `Borehole` | **Main input** to `GenerateStratum()`. Strata → GTP model. |
+| `well_log_curves` | `LogCurve` | `Borehole.LogCurves` | Seismic-well tie, property assignment. |
+| `meshes` (triangles) | `Geometry{Cells: N×3}` | `TINMesh` | Imported structural surfaces, embedded bodies for CSG. |
+| `meshes` (lines) | `Geometry{Cells: N×2}` | `FaultStickSet` | Fault interpretation sticks → `ToFaultProfile()`. |
+| `meshes` (points) | `Geometry{Cells: nil}` | `[]vec3d.T` | Initial borehole positions, TIN constraints. |
+| `grids` + `grid_data` | `Grid` | `SeismicCube` | Seismic constraint via `SeismicBoreholeIntegrator`. |
+| `fault_sets` + `fault_sticks` | `FaultSet` | `FaultProfile` | Fault displacement + GTP splitting. |
+| `sections` | `VerticalSection` | `SectionProfile` | 2D cross-section extraction. |
 
-| go-geocore (DB) | go-geocore (Go) | go-geology (Go) | Pipeline Consumer | Consumption |
-|-----------------|-----------------|-----------------|-------------------|-------------|
-| `wells` | `Well` | `Borehole` | `GenerateStratum(options.Boreholes)` | **Primary input.** Each well → one Borehole. X/Y/Elevation/Depth/Azimuth/Inclination copied directly. |
-| `well_surveys` | `SurveyPoint` | `TrajectoryPoint` | `Borehole.CalculateStratumsPositions()` | Survey points populate `Borehole.Trajectory[]`. Used for deviated well interpolation. |
-| `well_strata` | `StratumInterval` | `Stratum` | `Borehole.Stratums[]` → `BuildTriangularPrismModel` | **Core input.** Each stratum defines a layer surface. GTP prisms are built from these intervals. `Lithology → Stratum.Lithology`. `props → Properties`. |
-| `well_log_curves` | `LogCurve` | `LogCurvePoint` | `Borehole.LogCurves` → `GenerateSampleSeismicData` | Log curves are used for: (1) synthetic seismic generation via `LogCurves["Vp"]/["DEN"]`, (2) rock physics property assignment, (3) seismic-well tie. |
-| `meshes` (triangles) | `Geometry` (CellType=3) | `TINMesh` | `PreprocessStratumDataWithConfig` (terrain) / `FaultProfile.Surface` / `MeshBody` | Triangle meshes serve as: (1) DEM terrain surface, (2) pre-built fault surfaces, (3) embedded bodies for CSG cutting, (4) imported structural surfaces. |
-| `meshes` (lines) | `Geometry` (CellType=2) | `FaultStick` / `FaultStickSet` | `LoadFaultSticksFromCSV` → `ToFaultProfile()` | Line meshes → fault sticks → triangulated into `FaultProfile.Surface TINMesh`. |
-| `meshes` (points) | `Geometry` (CellType=0) | `[]vec3d.T` | Borehole generation / point cloud | Point clouds → initial borehole locations or TIN vertices. |
-| `grids` + `grid_data` | `Grid` | `SeismicCube` | `options.SeismicCubes` → `SeismicBoreholeIntegrator` | Seismic amplitude volumes used for: (1) horizon interpretation, (2) `ConstrainStratumPrediction` to adjust kriging results, (3) synthetic seismogram correlation. |
-| `fault_sets` + `fault_sticks` | `FaultSet` + `FaultStick` | `FaultProfile` + `FaultStickSet` | `options.FaultProfiles` → `GenerateFaultIntersections` | Fault sets: (1) `ToFaultProfile()` builds `FaultProfile.Surface TINMesh`, (2) `FaultProfile` drives borehole stratum displacement, (3) `FaultSplit` in GTP splits voxels at fault plane. |
-| `sections` | `VerticalSection` | `SectionProfile` | `BuildSectionProfile()` | 2D cross-sections extracted from 3D model along profile line. |
+## Detailed Consumption Paths
 
-## Data Flow Diagram
+### Path A: Wells → Borehole → GTP Stratum Mesh
 
 ```
-go-geocore DB                          go-geology
-────────────────────────────────────────────────────────────────────────
-wells + well_strata ──────────────────→ Borehole.Stratums ──→ GTP Model
-                                                                    │
-well_surveys ──→ Borehole.Trajectory ──→ CalculateStratumsPositions  │
-                                                                    │
-well_log_curves ──→ LogCurves["Vp"/"DEN"] ──→ SeismicBoreholeIntegrator
-                                                                    │
-meshes (tri) ──→ TINMesh ──→ DEM/FaultSurface/MeshBody              │
-                                                                    │
-grids + grid_data ──→ SeismicCube ──→ SeismicBoreholeIntegrator     │
-                                          │                          │
-fault_sets ──→ FaultProfile ──→ GenerateFaultIntersections ──────────┤
-                                          │                          │
-                                    ConstrainStratumPrediction ──────┤
-                                                                    │
-                                                                    ▼
-                                                            StratumMesh
-                                                          (OBJ/PLY output)
+wells ──────────→ Borehole{X, Y, Elevation, Depth}
+well_surveys ───→ Borehole.Trajectory[] (deviated well path)
+well_strata ────→ Borehole.Stratums[]:
+                     TopElevation/BaseElevation → GTP prism top/base
+                     Lithology → Stratum.Lithology → ColorMap
+                     props (JSONB) → Stratum.Properties → PropertySet
+                            │
+                            ▼
+                    BuildTriangularPrismModel()
+                            │
+                            ▼
+                    BuildStratumVolumesFromTriangularPrism()
+                            │
+                            ▼
+                    StratumMesh.Layers[] → OBJ export
 ```
 
-## Key Conversion Functions
+Every well → one Borehole. Strata intervals define layer surfaces across all boreholes
+via Delaunay TIN interpolation. Each TIN triangle + each stratum → one GTP (triangular prism).
 
-| From | To | go-geology Function |
-|------|-----|-------------------|
-| `Well` → `Borehole` | `Borehole{ID, X, Y, Elevation, Depth, Azimuth, Inclination, Trajectory, Stratums, LogCurves}` | Manual assignment in converter |
-| `FaultSet` → `FaultProfile` | `FaultSet.ToFaultProfile()` | `fault_sticks.go:ToFaultProfile()` |
-| `Geometry` (tri) → `TINMesh` | `TINMesh{Vertices, Triangles}` | Direct field copy |
-| `Grid` → `SeismicCube` | `SeismicCube{InlineCount, CrosslineCount, SampleCount, Data, Corners}` | Manual mapping in `go-geocore/grid_to_seismic.go` |
-| `LogCurve` → `[]LogCurvePoint` | `[]LogCurvePoint{Depth, Value}` | Direct field copy |
+### Path B: Fault Sticks → FaultProfile → Fault Surface + Stratum Offset
 
-## notes
+```
+meshes (lines, geom_type=2)
+       │
+       ▼
+FaultStickSet{
+    Stick{Points: [][3]float64},  ← each stick is one line mesh
+    Strike, Dip, Throw             ← estimated from point cloud
+}
+       │ ToFaultProfile()
+       ▼
+FaultProfile{
+    Points: []FaultPoint,   ← all vertices from all sticks
+    Surface: *TINMesh        ← triangulated surface (built by buildSurface())
+}
+       │
+       ├──→ GenerateFaultIntersections(boreholes)
+       │         │
+       │         ▼
+       │    Inserts IsFault stratum markers into each borehole at
+       │    the intersection Z of the borehole ray with the fault TIN.
+       │
+       ├──→ ApplyFaultWithOverlapResolution(bh)
+       │         │
+       │         ▼
+       │    Displaces top/base elevations on hanging wall/foot wall.
+       │    Then ResolveAllStrataOverlaps() fixes any overlaps.
+       │
+       └──→ GTP Pipeline
+                 │
+                 ▼
+            detectFaultSplit(gtp, bhs, ...)
+                 │
+                 ▼
+            Records which GTP voxel vertices are above/below
+            the fault plane → FaultSplit{AboveVerts, BelowVerts}.
+            splitGTPByFault() splits the prism at the fault plane
+            into two separate polyhedra.
+```
 
-- `StratumVolume` and `StratumVoxel` are **outputs** of the modeling pipeline, not inputs.
-  They are generated by `BuildTriangularPrismModel` → `BuildStratumVolumesFromTriangularPrism`.
-- `CollapsePillar` is not stored in go-geocore; it is generated during sample creation or
-  imported as a mesh body (stored in `meshes` table as triangle geometry).
-- `SeismicHorizon` is derived from `Grid` data (peak/trough tracking) or imported separately.
-  It is not a native go-geocore type but can be stored as a `mesh` (triangulated horizon surface).
-- `StratumOptions` is the main configuration struct that ties all inputs together for
-  `GenerateStratum()`. The go-geocore to go-geology converter assembles this struct
-  from the database.
+The full pipeline:
+```
+FaultStickSet → ToFaultProfile() → FaultProfile{Surface TINMesh}
+                                          │
+                              (sample.go) │ (gen.go)
+                                          ▼
+                              GenerateFaultIntersections()
+                              ApplyFaultWithOverlapResolution()
+                                          │
+                                          ▼
+                              BuildTriangularPrismModel()
+                              detectFaultSplit()
+                              splitGTPByFault()
+                                          │
+                                          ▼
+                              StratumMesh.Faults[] → OBJ group
+```
+
+### Path C: Seismic Grid → SeismicCube → Kriging Constraint
+
+```
+grids + grid_data ──→ SeismicCube{
+    InlineCount, CrosslineCount, SampleCount,
+    CornerTL/TR/BL/BR (mapped from Grid.Origin + Spacing),
+    Data[nx*ny*nz] float64 amplitude
+}
+       │
+       ├──→ SeismicBoreholeIntegrator
+       │         │
+       │         ▼
+       │    ConstrainStratumPrediction(strata, x, y)
+       │         │ Uses GetHorizonDepthAt() → bilinear grid interpolation
+       │         │ Uses getAmplitudeFactor() → amplitude-weighted confidence
+       │         │ ConstrainKrigingPrediction() → kriging*(1-c) + seismic*c
+       │         ▼
+       │    Adjusted stratum elevations (blended with kriging)
+       │
+       └──→ CreateVirtualBorehole(x, y, elev)
+                 │ Converts horizon depths → stratum list
+                 │ Merged into InterpolationBHs at weight c
+                 ▼
+            Virtual boreholes for denser TIN triangulation
+```
+
+### Path D: Triangle Mesh → TINMesh → Structural Surfaces
+
+```
+meshes (triangles, geom_type=3) ──→ TINMesh{Vertices, Triangles}
+       │
+       ├──→ DEM terrain (note: DEM is handled by a separate module,
+       │                    not via go-geocore meshes)
+       │
+       ├──→ FaultProfile.Surface (from pre-triangulated fault surface)
+       │         │
+       │         ▼
+       │    Used in GenerateFaultIntersections() BVH ray-triangle
+       │    intersection queries to find fault-borehole crossings.
+       │
+       ├──→ MeshBody (embedded 3D bodies)
+       │         │
+       │         ▼
+       │    ProcessCollapses() → CSG subtraction on stratum voxels
+       │    isVoxelFullyContainedBody() / isVoxelIntersectedBody()
+       │
+       └──→ Exported as fault surface OBJ groups
+```
+
+## About DEM
+
+DEM (Digital Elevation Model) is **not** stored in go-geocore's `meshes` table.
+It is handled by a dedicated raster/DEM module via `StratumOptions.DEM *Raster`.
+The DEM contributes:
+- Ground surface elevation at each borehole location
+- `GenerateDEMGridBoreholes()` creates surface-matching virtual boreholes
+- `ResampleHeight` option converts all strata to absolute elevation
+
+## About Well Log Curves
+
+`well_log_curves.data` (packed BYTEA) maps to `Borehole.LogCurves map[string][]LogCurvePoint`.
+These curves are consumed by `GenerateSampleSeismicData()` for synthetic seismogram
+generation: `LogCurves["Vp"]` + `LogCurves["DEN"]` → acoustic impedance → reflection coefficients.
+They can also drive rock property interpolation via KrigingManager.
+
+## Notes
+
+- `StratumVolume` / `StratumVoxel` / `CollapsePillar` are **outputs** of the pipeline,
+  not inputs. They are generated during modeling.
+- `SeismicHorizon` is derived from `SeismicCube` data (peak tracking) or imported separately.
+  It can be stored as a `mesh` (triangulated horizon surface), but is not a native type.
+- `StratumOptions` is the main configuration struct that assembles all inputs for
+  `GenerateStratum()`. The go-geocore → go-geology converter builds this struct.
