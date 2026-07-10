@@ -23,7 +23,9 @@ func ImportLAS(path string) (*Well, error) {
 		Logs: make(map[string]*LogCurve),
 		Meta: make(map[string]string),
 	}
-	w.Location = [3]float64{0, 0, l.Well.StartIndex}
+	if l.Well.StartIndex != 0 {
+		w.Location = [3]float64{0, 0, l.Well.StartIndex}
+	}
 
 	depth := l.DepthColumn()
 	for _, c := range l.Curves {
@@ -42,16 +44,14 @@ func ImportLAS(path string) (*Well, error) {
 		}
 		w.Logs[c.Mnemonic] = curve
 	}
-
 	if l.Well.Company != "" {
 		w.Meta["company"] = l.Well.Company
 	}
 	if l.Well.Field != "" {
 		w.Meta["field"] = l.Well.Field
 	}
-	if l.Well.Location != "" {
-		w.Meta["location"] = l.Well.Location
+	if l.Well.Well != "" {
+		w.Meta["well"] = l.Well.Well
 	}
-
 	return w, nil
 }
