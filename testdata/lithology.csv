@@ -1,0 +1,14 @@
+id,top,base,lith
+BH1,0,50,clay
+BH1,50,120,sandstone
+BH1,120,200,shale
+BH1,200,280,limestone
+BH1,280,300,bedrock
+BH2,0,30,soil
+BH2,30,100,sandstone
+BH2,100,180,shale
+BH2,180,250,bedrock
+BH3,0,40,clay
+BH3,40,90,sandstone
+BH3,90,150,siltstone
+BH3,150,200,bedrock

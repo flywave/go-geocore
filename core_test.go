@@ -149,6 +149,46 @@ func TestImportOMFMulti(t *testing.T) {
 	assert.Len(t, p.Geometry, 3)
 }
 
+func TestImportBoreholeCSV(t *testing.T) {
+	wells, err := ImportBoreholeCSV("testdata/collars.csv", "testdata/survey.csv", "testdata/lithology.csv")
+	require.NoError(t, err)
+	require.Len(t, wells, 3)
+
+	for _, w := range wells {
+		assert.NotEmpty(t, w.ID)
+		assert.Greater(t, w.Location[0], 0.0)
+		assert.Greater(t, w.Location[1], 0.0)
+	}
+
+	// BH1: has surveys and strata
+	bh1 := wells[0]
+	assert.Equal(t, "BH1", bh1.ID)
+	assert.Len(t, bh1.Surveys, 4)
+	assert.Len(t, bh1.Strata, 5)
+	assert.Equal(t, "sandstone", bh1.Strata[1].Lithology)
+	assert.InDelta(t, 120, bh1.Strata[1].BaseMD, 0.01)
+}
+
+func TestImportBoreholeCSV_CollarsOnly(t *testing.T) {
+	wells, err := ImportBoreholeCSV("testdata/collars.csv", "", "")
+	require.NoError(t, err)
+	require.Len(t, wells, 3)
+	assert.Empty(t, wells[0].Surveys)
+	assert.Empty(t, wells[0].Strata)
+}
+
+func TestImportBoreholeCSV_WithConfig(t *testing.T) {
+	cfg := &BoreholeCSVConfig{
+		IDCol: "id", XCol: "x", YCol: "y", ZCol: "z",
+		MDCol: "md", AzCol: "az", DipCol: "dip",
+		TopCol: "top", BaseCol: "base", LithCol: "lith",
+		HasHeader: true,
+	}
+	wells, err := ImportBoreholeCSVWithConfig("testdata/collars.csv", "testdata/survey.csv", "testdata/lithology.csv", cfg)
+	require.NoError(t, err)
+	require.Len(t, wells, 3)
+}
+
 func TestWellCurve(t *testing.T) {
 	w := &Well{
 		Logs: map[string]*LogCurve{
