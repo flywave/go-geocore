@@ -63,9 +63,9 @@ func TestGridIndex(t *testing.T) {
 
 func TestAddWell(t *testing.T) {
 	p := NewProject("wells")
-	w := p.AddWell("BH1", [3]float64{100, 200, 50})
+	w := p.AddWell("BH1", 100, 200, 50)
 	assert.Equal(t, "BH1", w.ID)
-	assert.Equal(t, float64(100), w.Location[0])
+	assert.Equal(t, float64(100), w.X)
 }
 
 func TestEmptyBounds(t *testing.T) {
@@ -156,8 +156,8 @@ func TestImportBoreholeCSV(t *testing.T) {
 
 	for _, w := range wells {
 		assert.NotEmpty(t, w.ID)
-		assert.Greater(t, w.Location[0], 0.0)
-		assert.Greater(t, w.Location[1], 0.0)
+		assert.Greater(t, w.X, 0.0)
+		assert.Greater(t, w.Y, 0.0)
 	}
 
 	// BH1: has surveys and strata

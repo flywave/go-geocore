@@ -10,11 +10,13 @@ const (
 )
 
 // Geometry holds any unstructured 3D geometry (points/lines/triangles/tetrahedra).
-// Cell type is inferred from Cells column count.
+// Maps to go-geology: TINMesh (triangles), FaultStickSet (lines), []vec3d.T (points).
+// Cell type is inferred from Cells column count:
+//   nil → points,  N×2 → lines,  N×3 → triangles,  N×4 → tetrahedra
 type Geometry struct {
-	Vertices [][3]float64
-	Cells    [][]uint32
-	Attrs    map[string][]float64
+	Vertices [][3]float64          // vertex positions
+	Cells    [][]uint32            // connectivity
+	Attrs    map[string][]float64  // per-vertex or per-cell attributes
 	Meta     map[string]string
 }
 
@@ -54,11 +56,12 @@ func (g *Geometry) Bounds() (min, max [3]float64) {
 }
 
 // Grid represents a structured 3D regular grid (seismic cubes, voxel models).
+// Maps to go-geology: SeismicCube, voxel-based property models.
 type Grid struct {
 	Origin  [3]float64
 	Spacing [3]float64
 	Dims    [3]int
-	Data    map[string][]float64
+	Data    map[string][]float64 // named arrays (amplitude, velocity, density...)
 	Meta    map[string]string
 }
 
@@ -67,26 +70,30 @@ func (g *Grid) Index(i, j, k int) int {
 	return i + j*g.Dims[0] + k*g.Dims[0]*g.Dims[1]
 }
 
-// SurveyPoint represents a single measured depth point along a wellbore trajectory.
+// SurveyPoint represents one measured-depth station along a wellbore trajectory.
+// Maps to go-geology: TrajectoryPoint.
 type SurveyPoint struct {
 	MD          float64 // measured depth
 	X, Y, Z     float64 // calculated coordinates
-	Azimuth     float64
-	Inclination float64
+	Azimuth     float64 // degrees from north
+	Inclination float64 // degrees from vertical
 }
 
 // StratumInterval represents a stratigraphic/lithological unit in a borehole.
+// Maps to go-geology: Stratum.
 type StratumInterval struct {
-	Name      string
+	ID        string  // formation/structure ID
+	Index     int     // order from surface (0,1,2...)
+	Lithology string
 	TopMD     float64 // top measured depth
 	BaseMD    float64 // base measured depth
 	TopElev   float64 // top elevation
 	BaseElev  float64 // base elevation
 	Thickness float64
-	Lithology string
 }
 
-// LogCurve holds a continuous well log curve (GR, RT, DT, DEN, etc.).
+// LogCurve holds a continuous well log curve (GR, RT, DT, DEN, CNL...).
+// Maps to go-geology: Borehole.LogCurves map[string][]LogCurvePoint.
 type LogCurve struct {
 	Mnemonic string
 	Unit     string
@@ -98,41 +105,41 @@ type LogSample struct {
 	Value float64
 }
 
-// Well represents a borehole with trajectory, strata, and log curves.
-// Corresponds to subsurface BoreholeSet (Collars + Survey + lithology).
+// Well represents a borehole with location, trajectory, stratigraphy, and logs.
+// Maps to go-geology: Borehole.
 type Well struct {
-	ID        string
-	Location  [3]float64 // wellhead X, Y, elevation
-	Elevation float64
-	Surveys   []SurveyPoint
-	Strata    []StratumInterval
-	Logs      map[string]*LogCurve
-	Meta      map[string]string
+	ID          string
+	X, Y, Elevation float64 // wellhead coordinates
+	Depth       float64     // total drilled depth
+	Azimuth     float64     // overall azimuth (straight-hole default)
+	Inclination float64     // overall inclination (straight-hole default)
+	Surveys     []SurveyPoint
+	Strata      []StratumInterval
+	Logs        map[string]*LogCurve
+	Meta        map[string]string
 }
 
 func (w *Well) Curve(mnemonic string) *LogCurve { return w.Logs[mnemonic] }
-func (w *Well) Depth() float64 {
-	if len(w.Strata) > 0 {
-		return w.Strata[len(w.Strata)-1].BaseMD
-	}
-	return 0
-}
 
-// FaultStick represents a single fault interpretation line (stick).
-// Multiple sticks with the same GroupID form a FaultStickSet.
+// FaultStick represents a single fault interpretation line.
+// Maps to go-geology: FaultStick.
 type FaultStick struct {
 	Points  [][3]float64
 	GroupID string
 	Meta    map[string]string
 }
 
-// FaultStickSet holds a collection of fault sticks forming a fault surface.
-// Corresponds to subsurface FaultSticks.
+// FaultSet represents a fault surface from a group of interpretation sticks.
+// Maps to go-geology: FaultProfile (after surface triangulation).
 type FaultSet struct {
-	ID     string
-	Sticks []FaultStick
-	Meta   map[string]string
+	ID        string
+	Strike    float64 // estimated strike (degrees)
+	Dip       float64 // estimated dip (degrees)
+	Throw     float64 // estimated throw (meters)
+	Sticks    []FaultStick
+	Meta      map[string]string
 }
+
 func (fs *FaultSet) AllPoints() [][3]float64 {
 	var pts [][3]float64
 	for _, s := range fs.Sticks {
@@ -141,17 +148,19 @@ func (fs *FaultSet) AllPoints() [][3]float64 {
 	return pts
 }
 
-// VerticalSection represents a 2D geological cross-section along a profile line.
+// VerticalSection represents a 2D geological cross-section along a profile.
+// Maps to go-geology: SectionProfile.
 type VerticalSection struct {
 	Name      string
 	StartLine [2]float64
 	EndLine   [2]float64
-	Wells     []string // well IDs on this section
+	Wells     []string // well IDs intersecting this section
 	Geometry  []Geometry
 	Meta      map[string]string
 }
 
 // Project is the top-level container for all geophysical/geological data.
+// Maps to go-geology: StratumMesh (after conversion/pipeline).
 type Project struct {
 	Name      string
 	Geometry  []Geometry
@@ -164,7 +173,7 @@ type Project struct {
 
 func NewProject(name string) *Project {
 	return &Project{
-		Name:     name,
+		Name: name,
 		Geometry: make([]Geometry, 0),
 		Grids:    make([]Grid, 0),
 		Wells:    make([]Well, 0),
@@ -187,36 +196,31 @@ func (p *Project) AddGrid(origin, spacing [3]float64, dims [3]int) *Grid {
 	return &p.Grids[len(p.Grids)-1]
 }
 
-func (p *Project) AddWell(id string, loc [3]float64) *Well {
-	w := Well{ID: id, Location: loc, Logs: make(map[string]*LogCurve), Meta: make(map[string]string)}
+func (p *Project) AddWell(id string, x, y, elev float64) *Well {
+	w := Well{
+		ID: id, X: x, Y: y, Elevation: elev,
+		Logs: make(map[string]*LogCurve),
+		Meta: make(map[string]string),
+	}
 	p.Wells = append(p.Wells, w)
 	return &p.Wells[len(p.Wells)-1]
 }
 
-func (p *Project) AddFaultSet(id string) *FaultSet {
-	fs := FaultSet{ID: id, Meta: make(map[string]string)}
+func (p *Project) AddFaultSet(id string, strike, dip, throw float64) *FaultSet {
+	fs := FaultSet{ID: id, Strike: strike, Dip: dip, Throw: throw, Meta: make(map[string]string)}
 	p.FaultSets = append(p.FaultSets, fs)
 	return &p.FaultSets[len(p.FaultSets)-1]
 }
 
+// Min, Max, Clamp — utility functions
 func Min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
+	if a < b { return a }; return b
 }
 func Max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
+	if a > b { return a }; return b
 }
-func Clamp(v, lo, hi float64) float64 {
-	if v < lo {
-		return lo
-	}
-	if v > hi {
-		return hi
-	}
+func FClamp(v, lo, hi float64) float64 {
+	if v < lo { return lo }
+	if v > hi { return hi }
 	return v
 }

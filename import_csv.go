@@ -64,12 +64,7 @@ func ImportBoreholeCSVWithConfig(collarPath, surveyPath, lithPath string, cfg *B
 	wells := make([]*Well, 0, len(collars))
 	for _, collar := range collars {
 		id := collar.id
-		w := &Well{
-			ID:       id,
-			Location: [3]float64{collar.x, collar.y, collar.z},
-			Logs:     make(map[string]*LogCurve),
-			Meta:     make(map[string]string),
-		}
+		w := &Well{ID: id, X: collar.x, Y: collar.y, Elevation: collar.z, Logs: make(map[string]*LogCurve), Meta: make(map[string]string)}
 		if pts, ok := surveys[id]; ok {
 			w.Surveys = pts
 		}

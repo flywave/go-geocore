@@ -57,19 +57,23 @@ idx := g.Index(il, xl, t) // inline/crossline/time → flat index
 
 ### Well — Borehole data
 
-Combines wellhead location, survey trajectory, stratigraphic intervals, and continuous log curves. Corresponds to subsurface `BoreholeSet` (Collars + Survey + lithology).
+Combines wellhead location, survey trajectory, stratigraphic intervals, and continuous log curves. Maps to go-geology: `Borehole`.
 
 ```go
 w := Well{
-    ID:       "BH-01",
-    Location: [3]float64{512345.6, 4567890.1, 125.0},
-    Surveys:  []SurveyPoint{
+    ID:        "BH-01",
+    X:         512345.6,
+    Y:         4567890.1,
+    Elevation: 125.0,
+    Depth:     350.0,
+    Azimuth:   15.3,  // overall azimuth (straight-hole default)
+    Surveys:   []SurveyPoint{
         {MD: 0, Azimuth: 0, Inclination: 0},
         {MD: 100, Azimuth: 15.3, Inclination: 2.1},
     },
     Strata:   []StratumInterval{
-        {Name: "TopSoil", TopMD: 0, BaseMD: 5, Lithology: "clay"},
-        {Name: "Sand",    TopMD: 5, BaseMD: 35, Lithology: "sandstone"},
+        {ID: "S1", Index: 0, TopMD: 0, BaseMD: 5, Lithology: "clay"},
+        {ID: "S2", Index: 1, TopMD: 5, BaseMD: 35, Lithology: "sandstone"},
     },
     Logs: map[string]*LogCurve{
         "GR": {Mnemonic: "GR", Unit: "API", Points: []LogSample{
@@ -78,7 +82,6 @@ w := Well{
         }},
     },
 }
-w.Depth()        // → 35 (total drilled depth)
 w.Curve("GR")    // → *LogCurve
 ```
 
@@ -121,6 +124,20 @@ p.AddFaultSet("F1")                     // returns *FaultSet
 well, _ := ImportLAS("well.las")
 p.Wells = append(p.Wells, *well)
 ```
+
+## Type Mapping to go-geology
+
+| go-geocore | go-geology | Conversion |
+|-----------|-----------|------------|
+| `Geometry` (triangles) | `TINMesh` | `Vertices → TINMesh.Vertices`, `Cells → TINMesh.Triangles` |
+| `Geometry` (points) | `[]vec3d.T` | Direct vertex array mapping |
+| `Grid` | `SeismicCube` | `Dims/Spacing → Inline/Crossline/SampleCount` |
+| `Well` | `Borehole` | `X,Y,Elevation → Borehole.X,Y,Elevation` |
+| `Well.Surveys` | `Borehole.Trajectory` | `MD,X,Y,Z,Azimuth,Inclination → TrajectoryPoint` |
+| `Well.Strata[]` | `Borehole.Stratums[]` | `TopMD/BaseMD → Top/Base`, `Lithology → Lithology` |
+| `Well.Logs` | `Borehole.LogCurves` | Named log curves by mnemonic |
+| `FaultSet` | `FaultProfile` / `FaultStickSet` | `Strike/Dip/Throw → FaultProfile`, sticks → `ToFaultProfile()` |
+| `VerticalSection` | `SectionProfile` | Well IDs + geometry along profile line |
 
 ## What go-geocore does NOT cover
 

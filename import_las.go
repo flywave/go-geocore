@@ -18,13 +18,9 @@ func ImportLAS(path string) (*Well, error) {
 		return nil, err
 	}
 
-	w := &Well{
-		ID:   l.Well.Well,
-		Logs: make(map[string]*LogCurve),
-		Meta: make(map[string]string),
-	}
+	w := &Well{ID: l.Well.Well, Logs: make(map[string]*LogCurve), Meta: make(map[string]string)}
 	if l.Well.StartIndex != 0 {
-		w.Location = [3]float64{0, 0, l.Well.StartIndex}
+		w.Elevation = l.Well.StartIndex
 	}
 
 	depth := l.DepthColumn()
