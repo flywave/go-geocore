@@ -1,6 +1,6 @@
 module github.com/flywave/go-geocore
 
-go 1.25
+go 1.24
 
 require (
 	github.com/flywave/go-gocad v0.0.0
