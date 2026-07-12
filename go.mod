@@ -4,9 +4,9 @@ go 1.24
 
 require (
 	github.com/flywave/go-gocad v0.0.0
-	github.com/flywave/go-las v0.0.0
-	github.com/flywave/go-omf v0.0.0
-	github.com/flywave/go-segy v0.0.0
+	github.com/flywave/go-las v0.0.0-00010101000000-000000000000
+	github.com/flywave/go-omf v0.0.0-00010101000000-000000000000
+	github.com/flywave/go-segy v0.0.0-00010101000000-000000000000
 	github.com/stretchr/testify v1.11.1
 )
 
