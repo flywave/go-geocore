@@ -12,11 +12,12 @@ const (
 // Geometry holds any unstructured 3D geometry (points/lines/triangles/tetrahedra).
 // Maps to go-geology: TINMesh (triangles), FaultStickSet (lines), []vec3d.T (points).
 // Cell type is inferred from Cells column count:
-//   nil → points,  N×2 → lines,  N×3 → triangles,  N×4 → tetrahedra
+//
+//	nil → points,  N×2 → lines,  N×3 → triangles,  N×4 → tetrahedra
 type Geometry struct {
-	Vertices [][3]float64          // vertex positions
-	Cells    [][]uint32            // connectivity
-	Attrs    map[string][]float64  // per-vertex or per-cell attributes
+	Vertices [][3]float64         // vertex positions
+	Cells    [][]uint32           // connectivity
+	Attrs    map[string][]float64 // per-vertex or per-cell attributes
 	Meta     map[string]string
 }
 
@@ -36,7 +37,7 @@ func (g *Geometry) CellType() CellType {
 	return CellType(cols)
 }
 func (g *Geometry) VertexCount() int { return len(g.Vertices) }
-func (g *Geometry) CellCount() int  { return len(g.Cells) }
+func (g *Geometry) CellCount() int   { return len(g.Cells) }
 func (g *Geometry) Bounds() (min, max [3]float64) {
 	if len(g.Vertices) == 0 {
 		return
@@ -63,6 +64,16 @@ type Grid struct {
 	Dims    [3]int
 	Data    map[string][]float64 // named arrays (amplitude, velocity, density...)
 	Meta    map[string]string
+
+	// 结构化网格的轴标签范围（地震 inline/crossline 编号等）。
+	// 编号可能不从 0/1 开始，数据落位必须做 label→index 映射。
+	// 非地震来源可为零值，此时消费方回退到 1..Dims。
+	InlineMin    int32
+	InlineMax    int32
+	CrosslineMin int32
+	CrosslineMax int32
+	TimeMin      float64
+	TimeMax      float64
 }
 
 func (g *Grid) CellCount() int { return g.Dims[0] * g.Dims[1] * g.Dims[2] }
@@ -82,8 +93,8 @@ type SurveyPoint struct {
 // StratumInterval represents a stratigraphic/lithological unit in a borehole.
 // Maps to go-geology: Stratum.
 type StratumInterval struct {
-	ID        string  // formation/structure ID
-	Index     int     // order from surface (0,1,2...)
+	ID        string // formation/structure ID
+	Index     int    // order from surface (0,1,2...)
 	Lithology string
 	TopMD     float64 // top measured depth
 	BaseMD    float64 // base measured depth
@@ -108,15 +119,15 @@ type LogSample struct {
 // Well represents a borehole with location, trajectory, stratigraphy, and logs.
 // Maps to go-geology: Borehole.
 type Well struct {
-	ID          string
+	ID              string
 	X, Y, Elevation float64 // wellhead coordinates
-	Depth       float64     // total drilled depth
-	Azimuth     float64     // overall azimuth (straight-hole default)
-	Inclination float64     // overall inclination (straight-hole default)
-	Surveys     []SurveyPoint
-	Strata      []StratumInterval
-	Logs        map[string]*LogCurve
-	Meta        map[string]string
+	Depth           float64 // total drilled depth
+	Azimuth         float64 // overall azimuth (straight-hole default)
+	Inclination     float64 // overall inclination (straight-hole default)
+	Surveys         []SurveyPoint
+	Strata          []StratumInterval
+	Logs            map[string]*LogCurve
+	Meta            map[string]string
 }
 
 func (w *Well) Curve(mnemonic string) *LogCurve { return w.Logs[mnemonic] }
@@ -132,12 +143,12 @@ type FaultStick struct {
 // FaultSet represents a fault surface from a group of interpretation sticks.
 // Maps to go-geology: FaultProfile (after surface triangulation).
 type FaultSet struct {
-	ID        string
-	Strike    float64 // estimated strike (degrees)
-	Dip       float64 // estimated dip (degrees)
-	Throw     float64 // estimated throw (meters)
-	Sticks    []FaultStick
-	Meta      map[string]string
+	ID     string
+	Strike float64 // estimated strike (degrees)
+	Dip    float64 // estimated dip (degrees)
+	Throw  float64 // estimated throw (meters)
+	Sticks []FaultStick
+	Meta   map[string]string
 }
 
 func (fs *FaultSet) AllPoints() [][3]float64 {
@@ -173,7 +184,7 @@ type Project struct {
 
 func NewProject(name string) *Project {
 	return &Project{
-		Name: name,
+		Name:     name,
 		Geometry: make([]Geometry, 0),
 		Grids:    make([]Grid, 0),
 		Wells:    make([]Well, 0),
@@ -214,13 +225,23 @@ func (p *Project) AddFaultSet(id string, strike, dip, throw float64) *FaultSet {
 
 // Min, Max, Clamp — utility functions
 func Min(a, b int) int {
-	if a < b { return a }; return b
+	if a < b {
+		return a
+	}
+	return b
 }
 func Max(a, b int) int {
-	if a > b { return a }; return b
+	if a > b {
+		return a
+	}
+	return b
 }
 func FClamp(v, lo, hi float64) float64 {
-	if v < lo { return lo }
-	if v > hi { return hi }
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
 	return v
 }

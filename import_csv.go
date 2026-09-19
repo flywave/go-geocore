@@ -8,27 +8,31 @@ import (
 )
 
 type BoreholeCSVConfig struct {
-	CollarPath  string
-	SurveyPath  string // optional
-	LithPath    string // optional
-	IDCol       string
-	XCol        string
-	YCol        string
-	ZCol        string
-	MDCol       string
-	AzCol       string
-	DipCol       string
-	TopCol      string
-	BaseCol     string
-	LithCol     string
-	HasHeader   bool
+	CollarPath string
+	SurveyPath string // optional
+	LithPath   string // optional
+	IDCol      string
+	XCol       string
+	YCol       string
+	ZCol       string
+	MDCol      string
+	AzCol      string
+	DipCol     string
+	TopCol     string
+	BaseCol    string
+	LithCol    string
+	// StratumIDCol 可选的地层编号列（如 "unit"/"formation"）。
+	// 缺省 "unit"；该列不存在时按井内顺序生成 "S0","S1",...
+	StratumIDCol string
+	HasHeader    bool
 }
 
 var DefaultBoreholeConfig = &BoreholeCSVConfig{
 	IDCol: "id", XCol: "x", YCol: "y", ZCol: "z",
 	MDCol: "md", AzCol: "az", DipCol: "dip",
 	TopCol: "top", BaseCol: "base", LithCol: "lith",
-	HasHeader: true,
+	StratumIDCol: "unit",
+	HasHeader:    true,
 }
 
 func ImportBoreholeCSV(collarPath, surveyPath, lithPath string) ([]*Well, error) {
@@ -69,9 +73,20 @@ func ImportBoreholeCSVWithConfig(collarPath, surveyPath, lithPath string, cfg *B
 			w.Surveys = pts
 		}
 		if ss, ok := liths[id]; ok {
+			// 岩性 CSV 的 top/base 是测量深度（MD），井口高程来自 collars.z。
+			// 早期实现把 Elevation 覆盖成 ss[0].TopElev（从未计算，恒为 0），
+			// 导致所有地层高程塌到 0；这里改为由井口高程换算绝对高程。
+			for i := range ss {
+				ss[i].Index = i
+				ss[i].TopElev = collar.z - ss[i].TopMD
+				ss[i].BaseElev = collar.z - ss[i].BaseMD
+				if ss[i].Thickness == 0 {
+					ss[i].Thickness = ss[i].BaseMD - ss[i].TopMD
+				}
+			}
 			w.Strata = ss
-			if len(ss) > 0 {
-				w.Elevation = ss[0].TopElev
+			if n := len(ss); n > 0 {
+				w.Depth = ss[n-1].BaseMD
 			}
 		}
 		wells = append(wells, w)
@@ -80,7 +95,10 @@ func ImportBoreholeCSVWithConfig(collarPath, surveyPath, lithPath string, cfg *B
 	return wells, nil
 }
 
-type collarRow struct{ id string; x, y, z float64 }
+type collarRow struct {
+	id      string
+	x, y, z float64
+}
 
 func readCollarsCSV(path string, cfg *BoreholeCSVConfig) ([]collarRow, error) {
 	f, err := os.Open(path)
@@ -235,6 +253,12 @@ func readLithologyCSV(path string, cfg *BoreholeCSVConfig) (map[string][]Stratum
 	if idx, ok := colMap[cfg.LithCol]; ok {
 		lithIdx = idx
 	}
+	unitIdx := -1
+	if cfg.StratumIDCol != "" {
+		if idx, ok := colMap[cfg.StratumIDCol]; ok {
+			unitIdx = idx
+		}
+	}
 
 	result := make(map[string][]StratumInterval)
 	for _, row := range rows[start:] {
@@ -255,6 +279,14 @@ func readLithologyCSV(path string, cfg *BoreholeCSVConfig) (map[string][]Stratum
 			s.Lithology = row[lithIdx]
 		}
 		id := row[idIdx]
+		// 地层编号：显式列优先，否则按井内顺序生成 S0/S1/...
+		// go-geology 用地层 ID 作为地质单元键（地震层位也按 ID 匹配），
+		// 空 ID 会让所有地层塌成同一单元。
+		if unitIdx >= 0 && unitIdx < len(row) && row[unitIdx] != "" {
+			s.ID = row[unitIdx]
+		} else {
+			s.ID = fmt.Sprintf("S%d", len(result[id]))
+		}
 		result[id] = append(result[id], s)
 	}
 	return result, nil
