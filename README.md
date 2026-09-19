@@ -103,11 +103,19 @@ fs.AllPoints() // flattened [][3]float64
 | Function | Source | Output | Description |
 |----------|--------|--------|-------------|
 | `ImportBoreholeCSV(collar, survey, lith)` | CSV files | `[]*Well` | Collars + survey trajectory + lithology intervals |
-| `ImportLAS(path)` | `go-las` | `*Well` | Well log curves (GR, RT, DT, DEN, CNL...) |
+| `ImportLAS(path)` | `go-las` | `*Well` | Well log curves (GR, RT, DT, DEN, CNL...) + collar from the header |
+| `ImportLASProject(path)` | `go-las` | `*Project` | One well: collar (X/Y/LATI/LONGI + ELEV/KB) + curves + strata from a lithology code curve |
+| `ImportLASProjectWithConfig(path, cfg)` | `go-las` | `*Project` | Same, with caller-supplied collar/well ID/lithology curve names |
 | `ImportSEGY(path)` | `go-segy` | `*Grid, *Geometry` | Seismic amplitude volume + trace lines |
 | `ImportGOCADTriSurf(path)` | `go-gocad` | `*Geometry` | GOCAD triangulated surface (.ts) |
 | `ImportGOCADPLine(path)` | `go-gocad` | `*Geometry` | GOCAD polyline (.pl) |
-| `ImportOMF(path)` | `go-omf` | `*Project` | OMF HDF5 project (multi-element) |
+| `ImportGOCADPLineFaults(path, groupID)` | `go-gocad` | `*FaultSet` | GOCAD fault trace (.pl) as one fault stick |
+| `AddGOCADPLineToProject(p, path, groupID)` | `go-gocad` | `error` | Append a fault trace to `p`; same groupID merges into one `FaultSet` |
+| `ImportOMF(path)` | `go-omf` | `*Project` | OMF HDF5 project (multi-element geometry; no borehole element) |
+
+`ImportLASProject` fails loudly when the file has no collar coordinates — it never
+invents a well location. Use `LASProjectConfig{HasCollar: true, X: .., Y: .., Elevation: ..}`
+to supply coordinates that are not in the file.
 
 ## Project — Top-level container
 
